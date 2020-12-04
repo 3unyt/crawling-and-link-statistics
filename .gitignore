@@ -1,0 +1,9 @@
+.DS_Store
+__pycache__/
+
+# packages
+elasticsearch-7.10.0
+
+# notes and tutorials
+HW3_notes.md
+es_tutorial.ipynb
