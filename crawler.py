@@ -6,20 +6,21 @@ from urllib.parse import urlparse, urljoin
 import time
 import pickle
 
-def extract_links(url, maxLinks=150, type_only=False):
-    print("Visiting url", url[:30], end="...\t")
+def extract_links(url, maxLinks=100):
+    print("Visiting url", url[:30], end="...", flush=True)
     try:
         # add headers to pretend human user
         headers = {'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_13_6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/68.0.3440.106 Safari/537.36',}
-        page = requests.get(url, headers=headers)
+        page = requests.get(url, headers=headers, timeout=5)
     except:
-        print("request error")
-        return "error", []
-    link_type  = page.headers['Content-Type'].split(";")[0]
-    if type_only:
-        return link_type, []
+        print("\trequest error")
+        return []
+    # print("OK", end="\t", flush=True)
+    soup = BeautifulSoup(page.text, "html.parser")
 
-    soup = BeautifulSoup(page.content, "html.parser")
+    if (not soup.body) or (not soup.body.find(string=re.compile("nobel", re.I))):
+        print("\tcannot find 'nobel'")
+        return []
 
     links = set()
     
@@ -33,23 +34,20 @@ def extract_links(url, maxLinks=150, type_only=False):
 
         # normalize link: <scheme>://<netloc>/<path>;<params>?<query>#<fragment>
         res = urlparse(new_link)
+        if res.scheme not in ["http", "https", "mailto"]:
+            continue
         new_link = res.scheme+"://" + res.netloc + res.path
         links.add(new_link)
         if len(links) >= maxLinks:
             break
 
-    print("outgoing links:", len(links))
-    return link_type, list(links)
-
-   
+    print("\toutgoing links:", len(links))
+    return list(links)
 
 
 def crawl(seeds, link_limit, max_depth=5):
-    start_time = time.time()
-    task_queue = collections.deque(seeds[:])
-    # heapq.heapify(taskQueue)
-    link_dict = {} # all info for links
     """
+    Return: link_dict
     {url: {
         "incoming": int
         "outgoing": int
@@ -58,13 +56,16 @@ def crawl(seeds, link_limit, max_depth=5):
         }
     }
     """
+    start_time = time.time()
+    task_queue = collections.deque(seeds[:])
+    link_dict = {} # all info for links
+  
     curr_depth = 0
     count = 0
     done = False
     while not done and task_queue:
         curr_depth += 1
-        print()
-        print("depth =", curr_depth, "|  number of links in queue:", len(task_queue))
+        print("\ndepth =", curr_depth, "|  number of links in queue:", len(task_queue))
 
         for _ in range(len(task_queue)):
             url = task_queue.popleft()
@@ -72,17 +73,27 @@ def crawl(seeds, link_limit, max_depth=5):
             if url in link_dict:
                 link_dict[url]['incoming'] += 1
             else:
-                url_type, links = extract_links(url)
                 link_dict[url] = {
                     "incoming": 1,
-                    "outgoing": len(links),
+                    "outgoing": 0,
                     "depth": curr_depth,
-                    "type": url_type
+                    "type": get_link_type(url)
                 }
+                
+                # if curr_depth==1:
+                #     links = extract_links(url, 1000)
+                # elif "wikipedia" in urlparse(url).netloc:
+                #     links=[]
+                # else:
+                #     links = extract_links(url)
+                
+                links = extract_links(url)
+                link_dict[url]["outgoing"] = len(links)
                 task_queue.extend(links)
 
                 if count+len(task_queue) >= link_limit:
                     print("Total links reached limit:", link_limit)
+                    print("Total visited links:", len(link_dict))
                     clear_task_queue(task_queue, curr_depth, link_dict)
                     done = True
                     break
@@ -112,27 +123,37 @@ def clear_task_queue(task_queue, curr_depth, link_dict):
     return None
 
 def get_link_type(url):
-    url_fragments = url.split("/")
-    head, tail = url_fragments[0], url_fragments[-1]
-    if head == "mailto:":
-        return "mail"
+    
+    parse = urlparse(url)
+    tail = parse.path.split("/")[-1]
+
+    if "http" not in parse.scheme:
+        return "non-http"
+    
+    domain_suffix = parse.netloc.split(".")[-1]
+    if domain_suffix in ['se', 'es', 'jp', 'cn', 'br', 'au', 'uk']:
+            return "foreign"
 
     if "." not in tail:
-        return "text/html"
+        return "html"
+    
+    suffix = tail.split(".")[-1]
+    if suffix in ['html', 'htm', 'shtml', 'php', 'com', 'org', 'edu', 'gov']:
+        return "html"
+    elif suffix in ['jpg','gif','png','svg','PNG']:
+        return "image"
+    elif suffix in ['mp3','wav','wma','ogg']:
+        return "audio"
+    elif suffix in ['mp4', 'mkv', 'ogv', 'webm']:
+        return "video"
+    elif suffix in ['pdf', 'doc', 'docx', 'txt']:
+        return "document"
+    elif suffix in ['asp', 'aspx']:
+        return "asp"
+    elif "wikipedia" in url:
+        return "html"
     else:
-        suffix = tail.split(".")[-1]
-        if suffix in ['html', 'php', 'org', 'edu', 'com', 'se']:
-            return "text/html"
-        elif suffix in ['jpg','gif','png','svg','PNG']:
-            return "image"
-        elif suffix in ['mp3','wav','wma','ogg']:
-            return "audio"
-        elif suffix in ['mp4', 'mkv', 'ogv']:
-            return "video"
-        elif suffix in ['pdf', 'doc', 'docx', 'txt']:
-            return "document"
-        else:
-            return "other"
+        return "other"
 
 
 def print_time_elapsed(start_time):
@@ -169,6 +190,9 @@ if __name__ == '__main__':
     file_path = "link_dict_20k.pickle"
     save_data(link_dict, file_path)
     print("Results saved to file:", file_path)
+
+    # extract_links('https://www.youtube.com/watch')
+   
 
     # print (get_link_type("https://upload.wikimedia.org/wikipedia/commons/b/be/Announcement_Nobelprize_Literature_2009-1.ogv"))
     # print(extract_links("https://en.wikipedia.org/wiki/File:Worldmapnobellaureatesbycountry2.PNG")[0])
