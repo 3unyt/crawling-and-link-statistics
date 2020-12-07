@@ -4,6 +4,7 @@ __pycache__/
 # packages
 elasticsearch-7.10.0
 
-# notes and tutorials
+# notes and refs
 HW3_notes.md
-es_tutorial.ipynb
+ref/
+
